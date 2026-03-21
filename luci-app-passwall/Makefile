@@ -10,6 +10,8 @@ PKG_NAME:=luci-app-passwall
 PKG_VERSION:=26.3.6
 PKG_RELEASE:=3.22
 PKG_PO_VERSION:=$(PKG_VERSION)
+PKG_RELEASE:=$(shell date +%m.%d | sed 's/^0//')
+PKG_PO_VERSION:=$(PKG_VERSION)
 
 PKG_CONFIG_DEPENDS:= \
 	CONFIG_PACKAGE_$(PKG_NAME)_Iptables_Transparent_Proxy \
