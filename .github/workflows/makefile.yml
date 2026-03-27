@@ -3,7 +3,7 @@
 # Copyright (C) 2026 Openwrt-Passwall Organization
 # Description: Auto compile with upstream sync
 #
-name: "Auto compile passwall"
+name: "auto passwall"
 on:
   schedule:
     - cron: '0 */2 * * *'   # 每2小时检查一次上游更新
