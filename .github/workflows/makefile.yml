@@ -6,7 +6,7 @@
 name: "Auto compile for passwall"
 on:
   schedule:
-    - cron: '0 */2 * * *'   # 每2小时检查一次上游更新
+    - cron: '0 * */3 * *'   # 每2小时检查一次上游更新
   repository_dispatch:
   workflow_dispatch:
     inputs:
