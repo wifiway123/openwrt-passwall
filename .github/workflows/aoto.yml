@@ -6,7 +6,7 @@
 name: "Auto compile for passwall"
 on:
   schedule:
-    - cron: '0 0 */3 * *'   # 每天 UTC 0:00 执行一次
+    - cron: '0 0 * * *'   # 每天 UTC 0:00 执行一次
   workflow_dispatch:
     inputs:
       ssh:
