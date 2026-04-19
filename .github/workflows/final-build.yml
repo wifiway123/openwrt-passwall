@@ -1,7 +1,7 @@
 # Copyright (c) 2022-2026 SMALLPROGRAM & OpenWrt-Passwall
 # Description: Precise Packaging with DB Injection (No Dummy IPK Error)
 
-name: "Auto compile "
+name: "final-Auto compile "
 on:
   repository_dispatch:
   workflow_dispatch:
