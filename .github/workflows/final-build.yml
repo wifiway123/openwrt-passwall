@@ -1,5 +1,5 @@
 # Copyright (c) 2022-2026 SMALLPROGRAM & OpenWrt-Passwall
-# Description: Official Style Multi-Platform with Smart .run Installer (Path Fixed)
+# Description: Precise Packaging with DB Injection (No Dummy IPK Error)
 
 name: "Auto compile "
 on:
@@ -16,9 +16,8 @@ env:
   TZ: Asia/Shanghai
   passwall: ${{ github.repository }}
   packages: Openwrt-Passwall/openwrt-passwall-packages
-  # 全量 Zip 打包列表
-  PKGS_ALL: "chinadns-ng dns2socks geoview hysteria ipt2socks microsocks naiveproxy tcping trojan-plus tuic-client shadowsocks-rust shadowsocksr-libev simple-obfs sing-box v2ray-geoip v2ray-plugin v2ray-geosite xray-plugin shadow-tls"
-  # .run 核心组件列表
+  PKGS_COMPILE: "chinadns-ng dns2socks geoview hysteria ipt2socks microsocks naiveproxy shadow-tls shadowsocks-rust shadowsocksr-libev simple-obfs sing-box tcping trojan-plus tuic-client v2ray-plugin xray-plugin v2ray-geodata"
+  PKGS_EXTRACT: "chinadns-ng dns2socks geoview hysteria ipt2socks microsocks naiveproxy shadow-tls shadowsocks-rust shadowsocksr-libev simple-obfs sing-box tcping trojan-plus tuic-client v2ray-plugin xray-plugin v2ray-geoip v2ray-geosite"
   PKGS_RUN: "chinadns-ng dns2socks microsocks tcping luci-app-passwall luci-i18n-passwall-zh-cn"
 
 permissions:
@@ -40,8 +39,11 @@ jobs:
         run: |
           cd luci-app-passwall
           local_ver=$(awk -F ':=' '/^PKG_VERSION:=|^PKG_RELEASE:=/ {print $2}' Makefile | sed ':a;N;s/\$(PKG_VERSION)-//;s/\n$//;s/\n/-/;ba')
+          fork_ver="${local_ver}-fork"
           remote_ver=$(wget -qO- -t1 -T2 https://api.github.com/repos/${{ env.passwall }}/releases/latest | jq -r '.tag_name')
-          echo "latest_version=${local_ver}" >> $GITHUB_OUTPUT
+          
+          echo "latest_version=${fork_ver}" >> $GITHUB_OUTPUT
+          
           if [[ "${{ github.event.inputs.force_build }}" == "true" || "$local_ver" != "$remote_ver" ]]; then
             echo "has_update=true" >> $GITHUB_OUTPUT
           else
@@ -75,23 +77,8 @@ jobs:
           XRAY_TAG=$(wget -qO- https://api.github.com/repos/XTLS/Xray-core/releases/latest | jq -r '.tag_name')
           wget -q https://github.com/XTLS/Xray-core/releases/download/${XRAY_TAG}/Xray-linux-${{ matrix.xray_arch }}.zip
           mkdir -p xray_bin && unzip *.zip -d xray_bin
+          rm -f *.zip
           echo "XRAY_VER=${XRAY_TAG}" >> $GITHUB_ENV
-
-      - name: Create Dummy xray-core IPK
-        run: |
-          mkdir -p dummy/CONTROL
-          cat > dummy/CONTROL/control << EOF
-          Package: xray-core
-          Version: ${{ env.XRAY_VER }}
-          Architecture: all
-          Maintainer: Xray-Official
-          Description: Dummy package for PassWall
-          EOF
-          tar -C dummy -czf data.tar.gz .
-          tar -C dummy/CONTROL -czf control.tar.gz .
-          echo "2.0" > debian-binary
-          ar r xray-core-dummy.ipk debian-binary control.tar.gz data.tar.gz
-          mkdir -p final_dummy && mv xray-core-dummy.ipk final_dummy/
 
       - name: Setup SDK & Compile
         run: |
@@ -106,37 +93,34 @@ jobs:
           echo "CONFIG_PACKAGE_luci-i18n-passwall-zh-cn=m" >> .config
           echo "CONFIG_PACKAGE_luci-compat=y" >> .config
           echo "CONFIG_PACKAGE_luci-lib-ipkg=y" >> .config
-          for p in ${{ env.PKGS_ALL }}; do echo "CONFIG_PACKAGE_$p=m" >> .config; done
+          for p in ${{ env.PKGS_COMPILE }}; do echo "CONFIG_PACKAGE_$p=m" >> .config; done
           make defconfig
-          for p in luci-app-passwall ${{ env.PKGS_ALL }}; do
+          for p in luci-app-passwall ${{ env.PKGS_COMPILE }}; do
             make package/$p/compile -j$(nproc) V=s || echo "::warning::Package $p failed"
           done
 
       - name: Organize Files
         id: organize
         run: |
-          # 都在当前工作区内操作，杜绝相对路径迷路
-          mkdir -p out/all_ipks out/run_ipks
+          mkdir -p out/zip_ipks out/run_ipks
           
-          # 提取 SDK 产物
-          find sdk/bin/packages/ -name "*.ipk" -exec cp {} out/all_ipks/ \;
-          
-          # 检查是否有文件产出
-          if [ -z "$(ls -A out/all_ipks)" ]; then echo "No IPK produced"; exit 1; fi
-          
-          # 筛选核心安装包
-          for p in ${{ env.PKGS_RUN }}; do
-            cp out/all_ipks/$p*.ipk out/run_ipks/ 2>/dev/null || true
+          # 精准提取 Zip 依赖包
+          for p in luci-app-passwall luci-i18n-passwall-zh-cn ${{ env.PKGS_EXTRACT }}; do
+            find sdk/bin/packages/ -name "$p*.ipk" -exec cp {} out/zip_ipks/ \;
           done
           
-          # 重命名主程序和语言包
-          for f in out/run_ipks/luci-*.ipk; do
+          # 提取 Run 核心包
+          for p in ${{ env.PKGS_RUN }}; do
+            cp out/zip_ipks/$p*.ipk out/run_ipks/ 2>/dev/null || true
+          done
+          
+          # 放入 Xray 二进制（不再放入任何 Dummy IPK）
+          cp xray_bin/xray out/run_ipks/xray_binary
+          
+          # 为主程序加前缀
+          for f in out/zip_ipks/luci-*.ipk out/run_ipks/luci-*.ipk; do
             [ -f "$f" ] && mv "$f" "$(dirname $f)/${{ matrix.ver_name }}$(basename $f)"
           done
-          
-          # 直接复制当前目录下的内容到输出目录，安全可靠
-          cp final_dummy/*.ipk out/run_ipks/
-          cp xray_bin/xray out/run_ipks/xray_binary
 
       - name: Create .run Installer
         run: |
@@ -146,26 +130,48 @@ jobs:
           echo "Deploying PassWall + Official Xray (${{ matrix.ver_name }})"
           line=$(grep -anm 1 "^__TARFILE_FOLLOWS__" "$0" | cut -d: -f1)
           tail -n +$((line + 1)) "$0" | tar xzv
-          opkg update && opkg install ./packages/*.ipk
+          
+          # 静默安装正常的 IPK
+          opkg update
+          ls ./packages/*.ipk >/dev/null 2>&1 && opkg install ./packages/*.ipk
+          
+          # 部署官方 Xray 并向系统数据库注入信息
           if [ -f "./packages/xray_binary" ]; then
+              echo "Installing Official Xray Binary..."
               mv -f ./packages/xray_binary /usr/bin/xray
               chmod +x /usr/bin/xray
-              # 手动注册清单
-              LIST_FILE="/usr/lib/opkg/info/xray-core.list"
-              [ -f "$LIST_FILE" ] && (grep -q "/usr/bin/xray" "$LIST_FILE" || echo "/usr/bin/xray" >> "$LIST_FILE")
+              
+              # 直接将版本信息写入 opkg status 数据库，完美伪装安装状态
+              if ! grep -q "Package: xray-core" /usr/lib/opkg/status; then
+                  echo "" >> /usr/lib/opkg/status
+                  echo "Package: xray-core" >> /usr/lib/opkg/status
+                  echo "Version: XRAY_VER_PLACEHOLDER" >> /usr/lib/opkg/status
+                  echo "Status: install user installed" >> /usr/lib/opkg/status
+                  echo "Architecture: all" >> /usr/lib/opkg/status
+              else
+                  sed -i "/Package: xray-core/,/^Status:/ s/^Version: .*/Version: XRAY_VER_PLACEHOLDER/" /usr/lib/opkg/status
+              fi
+              
+              # 注册卸载路径
+              mkdir -p /usr/lib/opkg/info
+              echo "/usr/bin/xray" > /usr/lib/opkg/info/xray-core.list
           fi
+          
           rm -rf ./packages
+          echo "Installation Complete!"
           exit 0
           __TARFILE_FOLLOWS__
           EOF
+          
+          # 替换脚本中的版本占位符
+          sed -i "s/XRAY_VER_PLACEHOLDER/${{ env.XRAY_VER }}/g" install.sh
           chmod +x install.sh
           
-          # 基于工作区内的 out 目录打包
           mkdir -p packages && cp out/run_ipks/* packages/
           tar czf packages.tar.gz -C packages .
           cat install.sh packages.tar.gz > passwall_${{ matrix.ver_name }}${{ matrix.platform }}.run
           
-          zip -rj passwall_all_pkgs_${{ matrix.ver_name }}${{ matrix.platform }}.zip out/all_ipks/*
+          zip -rj passwall_all_pkgs_${{ matrix.ver_name }}${{ matrix.platform }}.zip out/zip_ipks/*
 
       - name: Upload
         uses: softprops/action-gh-release@v2
@@ -173,4 +179,4 @@ jobs:
           tag_name: ${{ needs.job_check.outputs.latest_version }}
           files: |
             *.run
-            *.zip
+            passwall_all_pkgs_*.zip
