@@ -120,7 +120,7 @@ jobs:
           # 【核心逻辑】：仅为 24.10 版本在 run 包中加入 sing-box
           if [[ "${{ matrix.ver_name }}" == "23.05-24.10" ]]; then
             echo "Adding sing-box to 24.10 run package..."
-            find sdk/bin/packages/ -name "sing-box*.ipk" -exec cp {} out/run_ipks/ \;
+            find sdk/bin/packages/ -name "sing-box_*.ipk" -exec cp {} out/run_ipks/ \;
           fi
           
           # 放入官方 Xray 二进制
