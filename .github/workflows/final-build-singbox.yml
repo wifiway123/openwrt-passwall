@@ -1,5 +1,5 @@
 # Copyright (c) 2022-2026 SMALLPROGRAM & OpenWrt-Passwall
-# Description: Ultimate Precise Build (GeoData included, No luci-base in run, Tilde fixed, fork2)
+# Description: Ultimate Precise Build (GeoData included, No luci-base in run, fork2, Tilde logic removed)
 
 name: "final-Auto compile "
 on:
@@ -127,17 +127,10 @@ jobs:
           
           cp xray_bin/xray out/run_ipks/xray_binary
           
-          # 【修复点1】使用标准的 if 语法防止 set -e 报错中断
+          # 【修复点】保留安全的重命名机制，彻底去除了引发 bug 的波浪号替换
           for f in out/zip_ipks/luci-*.ipk out/run_ipks/luci-*.ipk; do
             if [ -f "$f" ]; then
               mv "$f" "$(dirname $f)/${{ matrix.ver_name }}$(basename $f)"
-            fi
-          done
-          
-          # 【修复点2】使用标准的 if 语法防止空匹配导致的致命错误
-          for f in out/zip_ipks/*~*.ipk out/run_ipks/*~*.ipk; do
-            if [ -f "$f" ]; then
-              mv "$f" "${f//~/-}"
             fi
           done
 
