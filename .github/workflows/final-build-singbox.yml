@@ -1,5 +1,5 @@
 # Copyright (c) 2022-2026 SMALLPROGRAM & OpenWrt-Passwall
-# Description: Precise Packaging with DB Injection (Xray Binary + Sing-Box IPK for 24.10)
+# Description: Ultimate Precise Build (Compile luci-base but exclude from run, GeoData included, Sing-Box & Lua-Runtime for 24.10)
 
 name: "final-Auto compile "
 on:
@@ -16,12 +16,9 @@ env:
   TZ: Asia/Shanghai
   passwall: ${{ github.repository }}
   packages: Openwrt-Passwall/openwrt-passwall-packages
-  # 恢复 sing-box 编译，包含 v2ray-geodata 产生数据包
   PKGS_COMPILE: "chinadns-ng dns2socks geoview hysteria ipt2socks microsocks naiveproxy shadow-tls shadowsocks-rust shadowsocksr-libev simple-obfs sing-box tcping trojan-plus tuic-client v2ray-plugin xray-plugin v2ray-geodata"
-  # 提取列表
   PKGS_EXTRACT: "chinadns-ng dns2socks geoview hysteria ipt2socks microsocks naiveproxy shadow-tls shadowsocks-rust shadowsocksr-libev simple-obfs sing-box tcping trojan-plus tuic-client v2ray-plugin xray-plugin v2ray-geoip v2ray-geosite"
-  # .run 基础核心列表
-  PKGS_RUN: "chinadns-ng dns2socks microsocks tcping luci-app-passwall luci-i18n-passwall-zh-cn"
+  PKGS_RUN: "chinadns-ng dns2socks microsocks tcping luci-app-passwall luci-i18n-passwall-zh-cn v2ray-geoip v2ray-geosite"
 
 permissions:
   contents: write
@@ -42,7 +39,10 @@ jobs:
         run: |
           cd luci-app-passwall
           local_ver=$(awk -F ':=' '/^PKG_VERSION:=|^PKG_RELEASE:=/ {print $2}' Makefile | sed ':a;N;s/\$(PKG_VERSION)-//;s/\n$//;s/\n/-/;ba')
+          
+          # 更新名字后缀为 -fork2
           fork_ver="${local_ver}-fork2"
+          
           remote_ver=$(wget -qO- -t1 -T2 https://api.github.com/repos/${{ env.passwall }}/releases/latest | jq -r '.tag_name')
           
           echo "latest_version=${fork_ver}" >> $GITHUB_OUTPUT
@@ -92,10 +92,15 @@ jobs:
           echo "src-git passwall_packages https://github.com/${{ env.packages }}.git;main" >> feeds.conf.default
           echo "src-git passwall https://github.com/openwrt-passwall/openwrt-passwall.git;main" >> feeds.conf.default
           ./scripts/feeds update -a && ./scripts/feeds install -a
+          
           echo "CONFIG_PACKAGE_luci-app-passwall=m" > .config
           echo "CONFIG_PACKAGE_luci-i18n-passwall-zh-cn=m" >> .config
           echo "CONFIG_PACKAGE_luci-compat=y" >> .config
           echo "CONFIG_PACKAGE_luci-lib-ipkg=y" >> .config
+          # 正常参与编译以满足依赖树，但不打包进 run
+          echo "CONFIG_PACKAGE_luci-base=y" >> .config
+          echo "CONFIG_PACKAGE_luci-lua-runtime=y" >> .config
+          
           for p in ${{ env.PKGS_COMPILE }}; do echo "CONFIG_PACKAGE_$p=m" >> .config; done
           make defconfig
           for p in luci-app-passwall ${{ env.PKGS_COMPILE }}; do
@@ -107,26 +112,22 @@ jobs:
         run: |
           mkdir -p out/zip_ipks out/run_ipks
           
-          # 提取 Zip 包所需的所有特定 IPK
           for p in luci-app-passwall luci-i18n-passwall-zh-cn ${{ env.PKGS_EXTRACT }}; do
             find sdk/bin/packages/ -name "$p*.ipk" -exec cp {} out/zip_ipks/ \;
           done
           
-          # 筛选 Run 包核心
           for p in ${{ env.PKGS_RUN }}; do
             cp out/zip_ipks/$p*.ipk out/run_ipks/ 2>/dev/null || true
           done
           
-          # 【核心逻辑】：仅为 24.10 版本在 run 包中加入 sing-box
           if [[ "${{ matrix.ver_name }}" == "23.05-24.10" ]]; then
-            echo "Adding sing-box to 24.10 run package..."
+            echo "Packaging specific dependencies for 24.10..."
             find sdk/bin/packages/ -name "sing-box_*.ipk" -exec cp {} out/run_ipks/ \;
+            find sdk/bin/packages/ -name "luci-lua-runtime*.ipk" -exec cp {} out/run_ipks/ \;
           fi
           
-          # 放入官方 Xray 二进制
           cp xray_bin/xray out/run_ipks/xray_binary
           
-          # 为主程序加前缀
           for f in out/zip_ipks/luci-*.ipk out/run_ipks/luci-*.ipk; do
             [ -f "$f" ] && mv "$f" "$(dirname $f)/${{ matrix.ver_name }}$(basename $f)"
           done
@@ -136,16 +137,16 @@ jobs:
           cat > install.sh << 'EOF'
           #!/bin/sh
           set -e
-          echo "Deploying PassWall + Components (${{ matrix.ver_name }})"
+          echo "Deploying PassWall + Full Components (${{ matrix.ver_name }})"
           line=$(grep -anm 1 "^__TARFILE_FOLLOWS__" "$0" | cut -d: -f1)
           
           mkdir -p ./packages
           tail -n +$((line + 1)) "$0" | tar xzv -C ./packages
           
           opkg update
+          ls ./packages/luci-lua-runtime*.ipk >/dev/null 2>&1 && opkg install ./packages/luci-lua-runtime*.ipk
           ls ./packages/*.ipk >/dev/null 2>&1 && opkg install ./packages/*.ipk
           
-          # 部署官方 Xray 并向数据库注入信息
           if [ -f "./packages/xray_binary" ]; then
               echo "Installing Official Xray Binary..."
               mv -f ./packages/xray_binary /usr/bin/xray
@@ -162,7 +163,7 @@ jobs:
           fi
           
           rm -rf ./packages
-          echo "Installation Complete!"
+          echo "Installation Complete! Please go to LuCI to save & apply."
           exit 0
           __TARFILE_FOLLOWS__
           EOF
@@ -170,8 +171,8 @@ jobs:
           sed -i "s/XRAY_VER_PLACEHOLDER/${{ env.XRAY_VER }}/g" install.sh
           chmod +x install.sh
           
-          mkdir -p packages && cp out/run_ipks/* packages/
-          tar czf packages.tar.gz -C packages .
+          mkdir -p temp_pack && cp out/run_ipks/* temp_pack/
+          tar czf packages.tar.gz -C temp_pack .
           cat install.sh packages.tar.gz > passwall_${{ matrix.ver_name }}${{ matrix.platform }}.run
           
           zip -rj passwall_all_pkgs_${{ matrix.ver_name }}${{ matrix.platform }}.zip out/zip_ipks/*
