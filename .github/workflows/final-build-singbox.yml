@@ -1,7 +1,7 @@
 # Copyright (c) 2022-2026 SMALLPROGRAM & OpenWrt-Passwall
-# Description: Ultimate Precise Build (Compile luci-base but exclude from run, GeoData included, Sing-Box & Lua-Runtime for 24.10)
+# Description: Ultimate Precise Build (GeoData included, No luci-base in run, Tilde fixed, fork2)
 
-name: "final-Auto compile "
+name: "final-Auto compile"
 on:
   repository_dispatch:
   workflow_dispatch:
@@ -40,7 +40,7 @@ jobs:
           cd luci-app-passwall
           local_ver=$(awk -F ':=' '/^PKG_VERSION:=|^PKG_RELEASE:=/ {print $2}' Makefile | sed ':a;N;s/\$(PKG_VERSION)-//;s/\n$//;s/\n/-/;ba')
           
-          # 更新名字后缀为 -fork2
+          # 【修改点】名字后缀改为 -fork2
           fork_ver="${local_ver}-fork2"
           
           remote_ver=$(wget -qO- -t1 -T2 https://api.github.com/repos/${{ env.passwall }}/releases/latest | jq -r '.tag_name')
@@ -97,7 +97,8 @@ jobs:
           echo "CONFIG_PACKAGE_luci-i18n-passwall-zh-cn=m" >> .config
           echo "CONFIG_PACKAGE_luci-compat=y" >> .config
           echo "CONFIG_PACKAGE_luci-lib-ipkg=y" >> .config
-          # 正常参与编译以满足依赖树，但不打包进 run
+          
+          # 【修改点】仅参与编译，不打包进 run
           echo "CONFIG_PACKAGE_luci-base=y" >> .config
           echo "CONFIG_PACKAGE_luci-lua-runtime=y" >> .config
           
@@ -130,6 +131,11 @@ jobs:
           
           for f in out/zip_ipks/luci-*.ipk out/run_ipks/luci-*.ipk; do
             [ -f "$f" ] && mv "$f" "$(dirname $f)/${{ matrix.ver_name }}$(basename $f)"
+          done
+          
+          # 【修改点】彻底清除文件名中的波浪号 ~ ，防止旧版路由器报错
+          for f in out/zip_ipks/*~*.ipk out/run_ipks/*~*.ipk; do
+            [ -f "$f" ] && mv "$f" "${f//~/-}"
           done
 
       - name: Create .run Installer
